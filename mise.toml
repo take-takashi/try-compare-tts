@@ -33,7 +33,7 @@ description = "Install OmniVoice's isolated Python runtime using uv"
 run = "uv sync --project environments/omnivoice"
 
 [tasks."download:qwen3"]
-description = "Download Qwen3-TTS 0.6B CustomVoice weights into models/"
+description = "Download Qwen3-TTS 1.7B CustomVoice weights into models/"
 run = "uv run --project environments/qwen3 python -m ttsbench download --model qwen3"
 
 [tasks."download:omnivoice"]
