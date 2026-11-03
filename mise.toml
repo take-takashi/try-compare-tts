@@ -33,7 +33,7 @@ description = "Install OmniVoice's isolated Python runtime using uv"
 run = "uv sync --project environments/omnivoice"
 
 [tasks."download:qwen3"]
-description = "Download Qwen3-TTS 1.7B CustomVoice weights into models/"
+description = "Download Qwen3-TTS 0.6B CustomVoice weights into models/"
 run = "uv run --project environments/qwen3 python -m ttsbench download --model qwen3"
 
 [tasks."download:omnivoice"]
@@ -69,3 +69,60 @@ run = "python -m ttsbench play --model omnivoice"
 [tasks.compare]
 description = "Summarize measured generation time and real-time factor"
 run = "python -m ttsbench compare"
+
+# Profiles: raw (unmodified), normalized (reading rules), dummy (dummy utterance
+# plus conservative trim), improved (normalized + dummy + trim + WAV checks).
+[tasks."generate:qwen3:normalized"]
+description = "Generate Qwen3 with Japanese reading fixes"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/qwen3 python -m ttsbench generate --model qwen3 --profile normalized"
+
+[tasks."generate:omnivoice:normalized"]
+description = "Generate OmniVoice with Japanese reading fixes"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/omnivoice python -m ttsbench generate --model omnivoice --profile normalized"
+
+[tasks."generate:qwen3:dummy"]
+description = "Generate Qwen3 with a dummy lead-in/out and conservative WAV crop"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/qwen3 python -m ttsbench generate --model qwen3 --profile dummy --max-retries 1"
+
+[tasks."generate:omnivoice:dummy"]
+description = "Generate OmniVoice with a dummy lead-in/out and conservative WAV crop"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/omnivoice python -m ttsbench generate --model omnivoice --profile dummy --max-retries 1"
+
+[tasks."generate:qwen3:improved"]
+description = "Generate Qwen3 with reading correction, dummy crop and one retry"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/qwen3 python -m ttsbench generate --model qwen3 --profile improved --max-retries 1"
+
+[tasks."generate:omnivoice:improved"]
+description = "Generate OmniVoice with reading correction, dummy crop and one retry"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/omnivoice python -m ttsbench generate --model omnivoice --profile improved --max-retries 1"
+
+[tasks."generate:compare-profiles"]
+description = "Run raw / normalized / improved profiles for both models"
+env = { HF_HUB_OFFLINE = "1" }
+run = [
+  "mise run generate:qwen3",
+  "mise run generate:qwen3:normalized",
+  "mise run generate:qwen3:improved",
+  "mise run generate:omnivoice",
+  "mise run generate:omnivoice:normalized",
+  "mise run generate:omnivoice:improved",
+]
+
+[tasks."setup:asr"]
+description = "Install a separate CPU ASR environment (optional)"
+run = "uv sync --project environments/qa"
+
+[tasks."download:asr"]
+description = "Explicitly download the optional local faster-whisper small model"
+run = "uv run --project environments/qa python -m ttsbench download:asr"
+
+[tasks."evaluate:asr"]
+description = "Transcribe locally generated WAVs and calculate approximate CER"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/qa python -m ttsbench evaluate:asr"
