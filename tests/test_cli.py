@@ -53,6 +53,10 @@ class CasesTest(unittest.TestCase):
         for key in MODEL_REPOS:
             self.assertEqual(model_dir(key).parent.name, "models")
 
+    def test_qwen3_uses_1_7b_customvoice(self):
+        self.assertEqual(MODEL_REPOS["qwen3"], "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
+        self.assertEqual(model_dir("qwen3").name, "qwen3-1.7b-customvoice")
+
     def test_validation_cli(self):
         self.assertEqual(main(["validate"]), 0)
 
