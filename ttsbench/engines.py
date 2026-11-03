@@ -9,11 +9,11 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL_REPOS = {
-    "qwen3": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "qwen3": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "omnivoice": "k2-fsa/OmniVoice",
 }
 MODEL_DIRS = {
-    "qwen3": ROOT / "models/qwen3-0.6b-customvoice",
+    "qwen3": ROOT / "models/qwen3-1.7b-customvoice",
     "omnivoice": ROOT / "models/omnivoice",
 }
 
