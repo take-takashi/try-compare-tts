@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import platform
 import subprocess
 import sys
 import time
 import wave
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,25 +77,51 @@ def validate(cases_path: Path, rules_path: Path) -> int:
     return 0
 
 
+def validate_run_id(run_id: str) -> str:
+    if not run_id or len(run_id) > 100 or not all(
+        ch.isascii() and (ch.isalnum() or ch in "-_") for ch in run_id
+    ):
+        raise ValueError("Run ID must contain only ASCII letters, digits, '-' or '_'")
+    return run_id
+
+
+def audio_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def generate(args: argparse.Namespace) -> int:
     cases = selected_cases(Path(args.cases), args.case)
     rules = load_rules(Path(args.rules))
     prepared = [(case, prepare(case, args.profile, rules)) for case in cases]
+    run_id = validate_run_id(args.run_id or uuid4().hex)
+    generation_id = uuid4().hex
+    print(f"Run ID: {run_id}", flush=True)
     start_load = time.perf_counter()
-    synthesizer, configuration = load_engine(
-        args.model, speaker=args.qwen_speaker, num_step=args.omnivoice_steps
-    )
+    load_error = None
+    configuration = {}
+    try:
+        synthesizer, configuration = load_engine(
+            args.model, speaker=args.qwen_speaker, num_step=args.omnivoice_steps
+        )
+    except Exception as exc:
+        load_error = exc
     load_seconds = round(time.perf_counter() - start_load, 3)
-    folder = RESULTS / "audio" / args.model / args.profile
+    folder = RESULTS / "audio" / run_id / generation_id / args.model / args.profile
     folder.mkdir(parents=True, exist_ok=True)
     failures = 0
     for case, input_text in prepared:
         output = folder / f"{case['id']}.wav"
         padded = folder / f"{case['id']}.padded.wav"
-        # A failed rerun must not leave a successful-looking old WAV.
-        output.unlink(missing_ok=True)
-        padded.unlink(missing_ok=True)
         record = {
+            "run_id": run_id,
+            "generation_id": generation_id,
+            "record_id": uuid4().hex,
+            "cases_sha256": audio_hash(Path(args.cases)),
+            "rules_sha256": audio_hash(Path(args.rules)),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "model": args.model,
             "profile": args.profile,
@@ -102,6 +131,8 @@ def generate(args: argparse.Namespace) -> int:
             "synthesis_text": input_text.synthesized,
             "reading_changed": input_text.reading_changed,
             "trimmed_dummy": input_text.trimmed,
+            "quality_assurance": "basic_checks_only",
+            "dummy_boundary_verified": False if input_text.trimmed else None,
             "configuration": configuration,
             "system": platform.platform(),
             "python": platform.python_version(),
@@ -109,7 +140,10 @@ def generate(args: argparse.Namespace) -> int:
             "status": "error",
         }
         start_all = time.perf_counter()
+        attempt = 0
         try:
+            if load_error is not None:
+                raise RuntimeError(f"Model load failed: {type(load_error).__name__}: {load_error}")
             for attempt in range(1, args.max_retries + 2):
                 start = time.perf_counter()
                 output.unlink(missing_ok=True)
@@ -143,6 +177,7 @@ def generate(args: argparse.Namespace) -> int:
                 "total_rtf": round(elapsed / seconds, 4),
                 "bytes": output.stat().st_size,
                 "audio_path": str(output.relative_to(ROOT) if output.is_relative_to(ROOT) else output),
+                "audio_sha256": audio_hash(output),
                 "quality": metrics,
                 **trim_info,
             })
@@ -168,14 +203,41 @@ def load_measurements(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def compare() -> int:
-    records = load_measurements(RESULTS / "measurements.jsonl")
-    if not records:
-        print("No measurements yet. Run mise run generate:qwen3 or generate:omnivoice.")
-        return 1
-    latest: dict[tuple[str, str, str], dict] = {}
+def latest_run(records: list[dict], run_id: str | None) -> tuple[str, dict]:
+    if run_id is not None:
+        validate_run_id(run_id)
+    else:
+        run_id = next((row["run_id"] for row in reversed(records) if row.get("run_id")), None)
+    if not run_id:
+        raise ValueError("No run-scoped measurements found. Generate a new run first; legacy results are not mixed in.")
+    latest = {}
     for row in records:
-        latest[(row["model"], row.get("profile", "raw"), row["case_id"])] = row
+        if row.get("run_id") == run_id:
+            latest[(row["model"], row["profile"], row["case_id"])] = row
+    if not latest:
+        raise ValueError(f"No measurements for run ID: {run_id}")
+    return run_id, latest
+
+
+def compare(run_id: str | None = None) -> int:
+    run_id, latest = latest_run(load_measurements(RESULTS / "measurements.jsonl"), run_id)
+    print(f"Run ID: {run_id}")
+    # Reusing a run ID with changed settings or text must not silently produce a comparison.
+    for field in ("cases_sha256", "rules_sha256", "system", "python"):
+        if len({r.get(field) for r in latest.values()}) > 1:
+            raise ValueError(f"Mixed {field} in run; use a new run ID")
+    for model in {k[0] for k in latest}:
+        configs = {json.dumps(r.get("configuration"), sort_keys=True) for (m, _, _), r in latest.items()
+                   if m == model and r.get("status") == "ok"}
+        if len(configs) > 1:
+            raise ValueError(f"Mixed configurations for {model}; use a new run ID")
+    for case_id in {k[2] for k in latest}:
+        if len({r.get("text") for (_, _, c), r in latest.items() if c == case_id}) > 1:
+            raise ValueError(f"Mixed source texts for {case_id}; use a new run ID")
+    groups = {(m, p) for m, p, _ in latest}
+    case_sets = {frozenset(c for m, p, c in latest if (m, p) == group) for group in groups}
+    if len(case_sets) > 1:
+        print("WARNING: model/profile groups contain different cases; averages are not directly comparable.")
     print("model | profile | success/total | avg RTF | avg total RTF | attempts | failures")
     print("--- | --- | --- | --- | --- | --- | ---")
     for model, profile in sorted({(k[0], k[1]) for k in latest}):
@@ -190,21 +252,32 @@ def compare() -> int:
     if asr_path.exists():
         asr_latest = {}
         for row in load_measurements(asr_path):
-            asr_latest[(row["model"], row["profile"], row["case_id"])] = row
+            key = (row.get("model"), row.get("profile"), row.get("case_id"))
+            measurement = latest.get(key)
+            if (measurement and measurement.get("status") == "ok"
+                    and row.get("record_id") == measurement.get("record_id")
+                    and row.get("audio_sha256") == measurement.get("audio_sha256")):
+                path = ROOT / measurement["audio_path"]
+                if path.is_file() and audio_hash(path) == measurement["audio_sha256"]:
+                    asr_latest[key] = row
         print("ASR transcript proxy: model | profile | mean CER | samples")
         for model, profile in sorted({(m, p) for m, p, _ in asr_latest}):
             vals = [r["cer"] for (m, p, _), r in asr_latest.items()
                     if (m, p) == (model, profile) and r.get("status") == "ok"]
             if vals:
                 print(f"{model} | {profile} | {sum(vals) / len(vals):.3f} | {len(vals)}")
-    print("NOTE: RTF measures speed. ASR CER is only a rough text-agreement proxy; neither proves pronunciation correctness.")
+    print("NOTE: Success means basic WAV checks only. Dummy boundaries and pronunciation are not verified; ASR CER is a rough proxy.")
     return 0
 
 
-def play(model: str, case: str, profile: str) -> None:
-    path = RESULTS / "audio" / model / profile / f"{case}.wav"
-    if not path.exists():
-        raise FileNotFoundError(f"{path} not found. Generate this profile first.")
+def play(model: str, case: str, profile: str, run_id: str | None = None) -> None:
+    _, latest = latest_run(load_measurements(RESULTS / "measurements.jsonl"), run_id)
+    record = latest.get((model, profile, case))
+    if not record or record.get("status") != "ok":
+        raise FileNotFoundError("No successful audio for this model/profile/case in the selected run.")
+    path = ROOT / record["audio_path"]
+    if not path.is_file() or audio_hash(path) != record.get("audio_sha256"):
+        raise ValueError(f"Audio missing or modified: {path}")
     if sys.platform != "darwin":
         raise RuntimeError("Audio playback uses macOS 'afplay'. Open WAVs manually on other OSes.")
     subprocess.run(["afplay", str(path)], check=True)
@@ -225,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     synth.add_argument("--cases", default=str(DEFAULT_CASES))
     synth.add_argument("--rules", default=str(DEFAULT_RULES))
     synth.add_argument("--case", help="One case ID instead of all")
+    synth.add_argument("--run-id", default=os.environ.get("TTSBENCH_RUN_ID"), help="Experiment ID; generated if omitted")
     synth.add_argument("--max-retries", type=int, default=0, help="Extra attempts after failed WAV quality checks")
     synth.add_argument("--qwen-speaker", default="Ono_Anna")
     synth.add_argument("--omnivoice-steps", type=int, default=16)
@@ -232,13 +306,15 @@ def main(argv: list[str] | None = None) -> int:
     playback.add_argument("--model", required=True, choices=sorted(MODEL_REPOS))
     playback.add_argument("--case", default="basic-01")
     playback.add_argument("--profile", choices=PROFILES, default="raw")
-    sub.add_parser("compare", help="Compare profiles and summarize speed and quality gate results")
+    playback.add_argument("--run-id", help="Experiment ID (default: latest)")
+    comparison = sub.add_parser("compare", help="Compare profiles and summarize speed and basic checks")
+    comparison.add_argument("--run-id", help="Experiment ID (default: latest)")
     sub.add_parser("download:asr", help="Download offline ASR model explicitly")
     asr_cmd = sub.add_parser("evaluate:asr", help="ASR CER proxy for generated audio")
     asr_cmd.add_argument("--model", choices=sorted(MODEL_REPOS))
     asr_cmd.add_argument("--profile", choices=PROFILES)
     asr_cmd.add_argument("--case")
-    asr_cmd.add_argument("--cases", default=str(DEFAULT_CASES))
+    asr_cmd.add_argument("--run-id", help="Experiment ID (default: latest)")
     args = parser.parse_args(argv)
     try:
         if args.command == "list":
@@ -258,18 +334,18 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("--omnivoice-steps must be positive and --max-retries nonnegative")
             return generate(args)
         if args.command == "play":
-            play(args.model, args.case, args.profile)
+            play(args.model, args.case, args.profile, args.run_id)
             return 0
         if args.command == "compare":
-            return compare()
+            return compare(args.run_id)
         if args.command == "download:asr":
             from .asr import download_asr
             print(f"ASR weights saved to: {download_asr()}")
             return 0
         if args.command == "evaluate:asr":
             from .asr import evaluate
-            return evaluate(load_cases(Path(args.cases)), model=args.model,
-                            profile=args.profile, case_id=args.case, results=RESULTS)
+            return evaluate(model=args.model, profile=args.profile, case_id=args.case,
+                            run_id=args.run_id, results=RESULTS)
     except (ValueError, FileNotFoundError, OSError, RuntimeError, ImportError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

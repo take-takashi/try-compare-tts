@@ -97,16 +97,16 @@ class ProfileTests(unittest.TestCase):
                 calls.append(text)
                 pcm_wav(path, [(0.25, True), (0.36, False), (1.10, True), (0.37, False), (0.24, True)] if text.startswith("うん") else [(1, True)])
             with patch("ttsbench.cli.RESULTS", temp), patch("ttsbench.cli.load_engine", return_value=(fake_synth, {"test": True})):
-                self.assertEqual(main(["generate", "--model", "qwen3", "--profile", "raw", "--case", "english-01"]), 0)
-                self.assertEqual(main(["generate", "--model", "qwen3", "--profile", "improved", "--case", "english-01"]), 0)
+                self.assertEqual(main(["generate", "--model", "qwen3", "--profile", "raw", "--case", "english-01", "--run-id", "experiment"]), 0)
+                self.assertEqual(main(["generate", "--model", "qwen3", "--profile", "improved", "--case", "english-01", "--run-id", "experiment"]), 0)
             self.assertEqual(len(calls), 2)
             self.assertNotEqual(calls[0], calls[1])
-            self.assertTrue((temp / "audio/qwen3/raw/english-01.wav").exists())
-            self.assertTrue((temp / "audio/qwen3/improved/english-01.wav").exists())
-            self.assertTrue((temp / "audio/qwen3/improved/english-01.padded.wav").exists())
             records = load_measurements(temp / "measurements.jsonl")
             self.assertEqual([r["profile"] for r in records], ["raw", "improved"])
             self.assertTrue(all(r["status"] == "ok" for r in records))
+            self.assertTrue(all(Path(r["audio_path"]).exists() for r in records))
+            self.assertTrue(Path(records[1]["padded_audio_path"]).exists())
+            self.assertNotEqual(records[0]["generation_id"], records[1]["generation_id"])
 
     def test_quality_retry_repeats_and_records_attempts(self):
         with tempfile.TemporaryDirectory() as d:

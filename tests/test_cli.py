@@ -61,9 +61,13 @@ class CasesTest(unittest.TestCase):
         self.assertEqual(main(["validate"]), 0)
 
     def test_empty_model_download_is_not_started_by_generate(self):
-        with patch("ttsbench.cli.load_engine", side_effect=FileNotFoundError("weights absent")) as loader:
+        with tempfile.TemporaryDirectory() as name, patch("ttsbench.cli.RESULTS", Path(name)), \
+                patch("ttsbench.cli.load_engine", side_effect=FileNotFoundError("weights absent")) as loader:
             self.assertEqual(main(["generate", "--model", "omnivoice", "--case", "basic-01"]), 1)
             loader.assert_called_once()
+            record = json.loads((Path(name) / "measurements.jsonl").read_text())
+            self.assertEqual(record["attempts"], 0)
+            self.assertIn("weights absent", record["error"])
 
 
 if __name__ == "__main__":

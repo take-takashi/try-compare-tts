@@ -1,6 +1,6 @@
 """Conservative WAV quality checks and experimental dummy speech cropping.
 
-Cropping requires clear silence intervals; it NEVER guesses where the text begins.
+Cropping heuristically selects silence intervals; they may be inside the body.
 These checks cannot establish Japanese reading correctness or speaker identity.
 """
 from __future__ import annotations
@@ -53,9 +53,9 @@ def quality_failures(metrics: dict[str, float]) -> list[str]:
 def trim_dummy_speech(path: Path, *, min_gap: float = 0.24) -> dict[str, float]:
     """Trim prefix/suffix around *two distinct* pronounced silence gaps.
 
-    A wrong cut would corrupt a benchmark; require an early and a late gap,
-    enough speech on each side, and enough speech remaining between them.
-    Keep the source WAV as `.padded.wav` for listening to unsuccessful trials.
+    Require two gaps and a minimum retained duration, but these checks cannot
+    prove that the gaps separate the dummy utterances from the body. Preserve
+    the source WAV for further automated evaluation.
     """
     rate, samples = samples_from_wav(path)
     window = max(1, rate // 100)  # 10 ms
@@ -78,8 +78,7 @@ def trim_dummy_speech(path: Path, *, min_gap: float = 0.24) -> dict[str, float]:
             if (i - start) * window / rate >= min_gap:
                 gaps.append((start, i))
             start = None
-    # Only accept the first/last marker pauses; other pauses inside the body
-    # must not be mistaken for padding unless they lie near its boundaries.
+    # Heuristic only: internal pauses may also satisfy these position tests.
     early = [g for g in gaps if g[0] < first + (last - first) * 0.35]
     late = [g for g in gaps if g[1] > first + (last - first) * 0.65]
     if not early or not late:

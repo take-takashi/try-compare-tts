@@ -4,6 +4,7 @@ Heavy optional imports happen only during download or synthesis.
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Callable
 
@@ -78,8 +79,16 @@ def load_engine(model_name: str, *, speaker: str = "Ono_Anna", num_step: int = 1
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
+    package_versions = {}
+    for package in ("qwen-tts" if model_name == "qwen3" else "omnivoice",
+                    "torch", "torchaudio", "transformers", "soundfile"):
+        try:
+            package_versions[package] = version(package)
+        except PackageNotFoundError:
+            package_versions[package] = None
     return synthesize, {
         "checkpoint": MODEL_REPOS[model_name],
+        "package_versions": package_versions,
         "local_dir": str(path.relative_to(ROOT)),
         "device": device,
         "dtype": str(dtype),

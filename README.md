@@ -4,6 +4,8 @@
 
 すべて `mise run` が操作入口です。Python 3.12 / uv をmiseで用意し、Qwen3-TTSとOmniVoiceは互いに独立したuv環境を使います。モデル、キャッシュ、生成音声、計測ログはリポジトリ配下に保存し、`.gitignore`でGit管理から除外します。
 
+**これは自動品質保証の完成版ではなく、実験基盤です。** `ok` / 成功率は基本的なWAV検査を通ったことを示すだけで、本文の完全性・読み・声の一貫性を保証しません。特にダミー切り出しには本文を誤って削る可能性があり、自動採用の根拠にしないでください。ASRを使った自動検査・再生成・採用判定は未実装です。
+
 ## 初期比較モデル
 
 | モデル | Hugging Faceの重み | 音声 |
@@ -21,6 +23,8 @@ mise run list                  # 比較モデル、テスト文章、プロフ�
 mise run download:qwen3        # 1.7Bの重みをmodels/配下へ
 mise run download:omnivoice    # OmniVoiceの重みをmodels/配下へ
 
+# 同じ実験として比較するコマンドに共通のIDを渡す（新しい実験では新しいIDを使う）
+export TTSBENCH_RUN_ID="$(python -c 'import uuid; print(uuid.uuid4().hex)')"
 mise run generate:qwen3        # 生の原稿(raw)
 mise run generate:omnivoice
 mise run generate:qwen3:normalized       # 読み辞書／文章ごとの読み補正
@@ -32,7 +36,7 @@ mise run play:qwen3            # raw/basic-01.wavをmacOSのafplayで再生
 mise run play:qwen3 -- --profile improved --case kanji-02
 ```
 
-`mise run generate:compare-profiles` で2モデルに対して raw / normalized / improved を順番に実行します。ただし6つの実験は負荷が大きいので、最初は1ケースで動作確認することを推奨します。
+`mise run generate:compare-profiles` で2モデルに対して raw / normalized / improved を順番に実行します。`TTSBENCH_RUN_ID` が未設定なら共通IDを自動生成し、途中で失敗しても残りを実行したうえで失敗を返します。ただし6つの実験は負荷が大きいので、最初は1ケースで動作確認することを推奨します。
 
 ```sh
 mise run generate:qwen3:improved -- --case kanji-02
@@ -50,7 +54,7 @@ mise run generate:omnivoice:improved -- --case kanji-02
 
 **原稿と辞書はGit追跡されます**：共通テスト `cases/japanese.json`、読み補正 `cases/reading_overrides.json`。`global` は全件の表記置換、`cases` は同形異音語など文章単位の明示的な読み指定です。原稿を変更して読み補正ルールの `source` がずれた場合は、生成前にエラーにします。**ひらがなへの置換で自然さが逆に悪化する場合もあるため、元原稿を必ず残します。**
 
-ダミー発話は日本語の「うん」「はい」を本文の前後に挟みます。WAVの冒頭・末尾に別々の明瞭な無音区間が検出できた場合だけ切り出し、`*.padded.wav` に加工前の音声を保存します。**境界を検出できないときは、本文を誤って削るリスクを避けて失敗にします。** 無音に基づく切り出しは実験用で、WhisperX等の強制アラインメントやフェード付き切り出しを実装したものではありません。
+ダミー発話は日本語の「うん」「はい」を本文の前後に挟みます。前寄り・後ろ寄りに別々の無音区間が検出された場合に切り出し、`*.padded.wav` に加工前の音声を保存します。区間が見つからなければ失敗にしますが、**見つかった区間が本文中の間である可能性もあり、本文を誤って削ることがあります**。境界の正しさは検証しておらず、ログには `dummy_boundary_verified: false` と記録します。WhisperX等の強制アラインメントやフェード付き切り出しは未実装です。
 
 基本品質検査は無音・極端なクリッピング・極端に短い音声を検出します。`--max-retries N` は**基本品質検査・切り出し失敗**について追加でN回生成する指定であり、日本語誤読や声の変化を自動的に判定するものではありません。再生成の試行回数・合計時間も記録します。
 
@@ -65,7 +69,7 @@ mise run evaluate:asr -- --model qwen3 --profile improved --case kanji-02
 mise run compare                      # ASRの平均文字誤り率も表示
 ```
 
-ASRは生成文と認識結果の文字誤り率（CER）を計算しますが、**漢字とひらがなの表記揺れは吸収しません**。発音が正しくても数値が悪化する場合があります。人間による試聴の代替でも、正式な読み誤り率でもありません。ASRを再生成の自動判定にはまだ使いません。
+ASRは生成文と認識結果の文字誤り率（CER）を計算しますが、**漢字とひらがなの表記揺れは吸収しません**。発音が正しくても数値が悪化する場合があります。正式な読み誤り率ではなく、ASRを再生成の自動判定にはまだ使いません。
 
 ## 保存場所・ログ
 
@@ -74,11 +78,17 @@ cases/japanese.json            # 共通原稿（Git追跡）
 cases/reading_overrides.json  # 読み補正の定義（Git追跡）
 models/                       # 全重みとHFキャッシュ（Git除外）
 environments/*/.venv/         # モデル別のPython環境（Git除外）
-results/audio/<model>/<profile>/<case-id>.wav
-results/audio/<model>/<profile>/<case-id>.padded.wav
+results/audio/<run-id>/<generation-id>/<model>/<profile>/<case-id>.wav
+results/audio/<run-id>/<generation-id>/<model>/<profile>/<case-id>.padded.wav
 results/measurements.jsonl    # 原文・生成文字列・速度・生成状態・再試行・切り出し情報
 results/asr.jsonl             # ASR補助評価
 ```
+
+生成時に `--run-id` または環境変数 `TTSBENCH_RUN_ID` を指定しなければ、コマンドごとに新しいIDが生成・表示されます。別々のコマンドを比較するには同じIDを指定してください。`compare`・`play`・`evaluate:asr` はデフォルトで最新の実験を参照し、`--run-id ID` で指定もできます。例えば `mise run compare -- --run-id ID`。別の実験を始めるときは環境変数を更新するか `unset TTSBENCH_RUN_ID` してください。
+
+同じ実験IDで同じケースを再実行すると、比較にはそのケースの最新記録を使います。過去のWAVは別の生成IDの下に残ります。モデルのロード失敗も対象ケースの失敗として記録します。原稿・読み辞書、OS・Python、同一モデルの設定や主要パッケージのバージョンが同じ実験内で異なる場合、比較はエラーにします。ただしモデル重みのリビジョン等までは固定・検証していないため、重みや環境を変更したら新しいIDを使ってください。各モデルで実行したケース数が異なれば平均や成功率は直接比較できないため、表の分母を確認してください。旧形式のIDなしログは混ぜず、新しい実験を生成してください。
+
+ASR結果は生成記録IDとWAVのSHA-256に紐付きます。再生成・WAV変更後は古いCERを表示しないので、必要なら再評価してください。
 
 `RTF` はロード時間を含まず、モデルから得た音声を切り出した後の再生時間で合成時間を割った値です。`total_rtf` は切り出し・再試行を含む時間を同じ再生時間で割ったものです。`load_seconds` は別記録します。現段階ではGPUメモリ、TTFA、話者類似度、アクセントの客観評価は測りません。
 
