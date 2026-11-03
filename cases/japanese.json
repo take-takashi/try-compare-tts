@@ -1,0 +1,11 @@
+[
+  {"id": "basic-01", "category": "basic", "text": "今日はとても良い天気ですね。午後から散歩に出かけましょう。"},
+  {"id": "kanji-01", "category": "homograph", "text": "生物の先生が生物を観察しています。"},
+  {"id": "kanji-02", "category": "homograph", "text": "人気のない公園で、人気の歌手について話しました。"},
+  {"id": "number-01", "category": "numbers", "text": "商品は税込1,280円です。割引率は12.5パーセントです。"},
+  {"id": "date-01", "category": "dates", "text": "2026年11月3日、午後7時30分に集合してください。"},
+  {"id": "proper-01", "category": "proper-nouns", "text": "御徒町から湯島を通って秋葉原へ向かいます。"},
+  {"id": "english-01", "category": "mixed-language", "text": "GitHub ActionsとPythonを使って、TTSモデルを比較します。"},
+  {"id": "pause-01", "category": "prosody", "text": "えっ、本当ですか？……それは、ちょっと驚きました。"},
+  {"id": "long-01", "category": "longform", "text": "おはようございます。本日は、日本語の読み上げ技術についてご紹介します。まずは文章の自然さを確認し、次に固有名詞や数字の読み方を比較します。最後に、生成時間と音声の長さから処理性能を評価します。"}
+]

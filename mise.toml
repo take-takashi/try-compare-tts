@@ -1,0 +1,71 @@
+[tools]
+python = "3.12"
+uv = "latest"
+
+[env]
+# Keep all Hugging Face caches and downloaded checkpoints within this repository.
+HF_HOME = "{{ config_root }}/models/.hf-cache"
+HF_HUB_CACHE = "{{ config_root }}/models/.hf-cache/hub"
+PYTHONPATH = "{{ config_root }}"
+
+[tasks.list]
+description = "Show common Japanese test cases and model configurations"
+run = "python -m ttsbench list"
+
+[tasks.validate]
+description = "Validate the common Japanese test cases"
+run = "python -m ttsbench validate"
+
+[tasks.test]
+description = "Run dependency-free unit tests"
+run = "python -m unittest discover -s tests -v"
+
+[tasks.check]
+description = "Validate cases and run tests"
+depends = ["validate", "test"]
+
+[tasks."setup:qwen3"]
+description = "Install Qwen3-TTS's isolated Python runtime using uv"
+run = "uv sync --project environments/qwen3"
+
+[tasks."setup:omnivoice"]
+description = "Install OmniVoice's isolated Python runtime using uv"
+run = "uv sync --project environments/omnivoice"
+
+[tasks."download:qwen3"]
+description = "Download Qwen3-TTS 0.6B CustomVoice weights into models/"
+run = "uv run --project environments/qwen3 python -m ttsbench download --model qwen3"
+
+[tasks."download:omnivoice"]
+description = "Download OmniVoice weights into models/"
+run = "uv run --project environments/omnivoice python -m ttsbench download --model omnivoice"
+
+[tasks."generate:qwen3"]
+description = "Synthesize common Japanese sentences with Qwen3-TTS"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/qwen3 python -m ttsbench generate --model qwen3"
+
+[tasks."generate:omnivoice"]
+description = "Synthesize common Japanese sentences with OmniVoice"
+env = { HF_HUB_OFFLINE = "1" }
+run = "uv run --project environments/omnivoice python -m ttsbench generate --model omnivoice"
+
+[tasks."generate:all"]
+env = { HF_HUB_OFFLINE = "1" }
+description = "Run both local TTS models against the same Japanese cases (sequentially)"
+run = [
+  "uv run --project environments/qwen3 python -m ttsbench generate --model qwen3",
+  "uv run --project environments/omnivoice python -m ttsbench generate --model omnivoice",
+]
+
+[tasks."play:qwen3"]
+description = "Play a generated Qwen3 sample (macOS afplay)"
+run = "python -m ttsbench play --model qwen3"
+
+[tasks."play:omnivoice"]
+description = "Play a generated OmniVoice sample (macOS afplay)"
+run = "python -m ttsbench play --model omnivoice"
+
+[tasks.compare]
+description = "Summarize measured generation time and real-time factor"
+run = "python -m ttsbench compare"
