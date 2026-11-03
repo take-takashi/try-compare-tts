@@ -8,7 +8,7 @@
 
 | モデル | Hugging Face checkpoint | 初期設定 |
 | --- | --- | --- |
-| Qwen3-TTS | `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` | `Ono_Anna`, Japanese |
+| Qwen3-TTS | `Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice` | `Ono_Anna`, Japanese |
 | OmniVoice | `k2-fsa/OmniVoice` | 日本語 `ja`, auto voice, 16 steps |
 
 同じ**文章**で比較しますが、声・アーキテクチャ・推論ステップは異なります。音声クローンはまだ対象外です。
@@ -49,7 +49,7 @@ mise run play:omnivoice -- --case kanji-01
 | `mise.toml`, `pyproject.toml`, `ttsbench/`, `tests/`, `cases/` | Git追跡 |
 | `environments/qwen3/pyproject.toml`, `environments/omnivoice/pyproject.toml` | Git追跡（モデル別uv環境） |
 | `environments/*/.venv/` | Git除外 |
-| `models/qwen3-0.6b-customvoice/` | Git除外（重み） |
+| `models/qwen3-1.7b-customvoice/` | Git除外（重み） |
 | `models/omnivoice/` | Git除外（重み） |
 | `models/.hf-cache/`, `results/`, `.cache/` | Git除外（キャッシュ・WAV・計測結果） |
 
